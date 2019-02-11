@@ -96,10 +96,10 @@ class VideoProcessor:
         self._end_flag = False
         if (self._use_output_queue):
             if (self._worker_process == None):
-                self._worker_process = mp.process(target=self._do_work_queue, args=())
+                self._worker_process = mp.Process(target=self._do_work_queue, args=())
         else:
             if (self._worker_process == None):
-                self._worker_process = mp.process(target=self._do_work_network_processor, args=())
+                self._worker_process = mp.Process(target=self._do_work_network_processor, args=())
 
         self._worker_process.start()
 
