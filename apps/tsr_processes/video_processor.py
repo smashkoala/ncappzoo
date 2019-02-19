@@ -102,11 +102,6 @@ class VideoProcessor(Process):
             else:
                 self._do_work_network_processor()
 
-            throttling = obj_detect_dev.get_option(mvnc.DeviceOption.RO_THERMAL_THROTTLING_LEVEL)
-            if (throttling > 0):
-                print("\nDevice is throttling, level is: " + str(throttling))
-                print("Sleeping for a few seconds....")
-                cv2.waitKey(2000)
 
     def stop_processing(self):
         """stops the asynchronous process from reading any new frames from the video device
@@ -161,9 +156,10 @@ class VideoProcessor(Process):
                 if (not ret_val):
                     print("No image from video device, exiting")
                     break
-                self._output_queue.put(input_image, True, self._queue_put_wait_max)
+                print("Putting image into queue")
+                self._output_queue.put(input_image)
 
-            except queue.Full:
+            except self._output_queue.Full:
                 # the video device is probably way faster than the processing
                 # so if our output queue is full sleep a little while before
                 # trying the next image from the video.

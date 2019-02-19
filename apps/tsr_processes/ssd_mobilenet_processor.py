@@ -153,6 +153,12 @@ class SsdMobileNetProcessor(Process):
             # Load tensor and get result.  This executes the inference on the NCS
             self._graph.queue_inference_with_fifo_elem(self._fifo_in, self._fifo_out, inference_image.astype(numpy.float32), input_image)
 
+            throttling = self._obj_detect_dev.get_option(mvnc.DeviceOption.RO_THERMAL_THROTTLING_LEVEL)
+            if (throttling > 0):
+                print("\nDevice is throttling, level is: " + str(throttling))
+                print("Sleeping for a few seconds....")
+                cv2.waitKey(2000)
+
         return
 
 
