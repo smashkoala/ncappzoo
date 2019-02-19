@@ -9,17 +9,17 @@
 from mvnc import mvncapi as mvnc
 import numpy as numpy
 import cv2
-import queue
+from multiprocessing import Process, Queue
 
 
-class SsdMobileNetProcessor:
+class SsdMobileNetProcessor(Process):
 
     # Neural network assumes input images are these dimensions.
     SSDMN_NETWORK_IMAGE_WIDTH = 300
     SSDMN_NETWORK_IMAGE_HEIGHT = 300
 
 
-    def __init__(self, network_graph_filename: str, ncs_device: mvnc.Device,
+    def __init__(self, input_queue: Queue, output_queue: Queue, network_graph_filename: str, ncs_device: mvnc.Device,
                  inital_box_prob_thresh: float, classification_mask:list=None):
         """Initializes an instance of the class
 
@@ -32,6 +32,7 @@ class SsdMobileNetProcessor:
         :return : None
         """
 
+        Process.__init(self)
         # Load graph from disk and allocate graph.
         try:
             with open(network_graph_filename, mode='rb') as graph_file:
@@ -44,6 +45,9 @@ class SsdMobileNetProcessor:
             print('Error - could not load neural network graph file: ' + network_graph_filename)
             print('\n\n')
             raise
+
+        self._input_queue = input_queue
+        self._output_queue = output_queue
 
         self._classification_labels=SsdMobileNetProcessor.get_classification_labels()
 
@@ -92,7 +96,8 @@ class SsdMobileNetProcessor:
         return ret_labels
 
 
-    def start_aysnc_inference(self, input_image:numpy.ndarray):
+    #def start_aysnc_inference(self, input_image:numpy.ndarray):
+    def run(self):
         """Start an asynchronous inference.  When its complete it will go to the output FIFO queue which
            can be read using the get_async_inference_result() method
            If there is no room on the input queue this function will block indefinitely until there is room,
@@ -108,18 +113,19 @@ class SsdMobileNetProcessor:
         # and finally convert to float16 to pass to LoadTensor as input
         # for an inference
         # this returns a new image so the input_image is unchanged
+        while True:
 
-        inference_image = cv2.resize(input_image,
-                                 (SsdMobileNetProcessor.SSDMN_NETWORK_IMAGE_WIDTH,
-                                  SsdMobileNetProcessor.SSDMN_NETWORK_IMAGE_HEIGHT),
-                                 cv2.INTER_LINEAR)
+            inference_image = cv2.resize(input_image,
+                                     (SsdMobileNetProcessor.SSDMN_NETWORK_IMAGE_WIDTH,
+                                      SsdMobileNetProcessor.SSDMN_NETWORK_IMAGE_HEIGHT),
+                                     cv2.INTER_LINEAR)
 
-        # modify inference_image for network input
-        inference_image = inference_image - 127.5
-        inference_image = inference_image * 0.007843
+            # modify inference_image for network input
+            inference_image = inference_image - 127.5
+            inference_image = inference_image * 0.007843
 
-        # Load tensor and get result.  This executes the inference on the NCS
-        self._graph.queue_inference_with_fifo_elem(self._fifo_in, self._fifo_out, inference_image.astype(numpy.float32), input_image)
+            # Load tensor and get result.  This executes the inference on the NCS
+            self._graph.queue_inference_with_fifo_elem(self._fifo_in, self._fifo_out, inference_image.astype(numpy.float32), input_image)
 
         return
 
@@ -136,30 +142,30 @@ class SsdMobileNetProcessor:
     #    float value for box X pixel location of lower right within source image
     #    float value for box Y pixel location of lower right within source image
     #    float value that is the probability for the network classification 0.0 - 1.0 inclusive.
-    def get_async_inference_result(self):
-        """Reads the next available object from the output FIFO queue.  If there is nothing on the output FIFO,
-        this fuction will block indefinitiley until there is.
-
-        :return: tuple of the filtered results along with the original input image
-        the filtered results is a list of lists. each of the inner lists represent one found object and contain
-        the following 6 values:
-           string that is network classification ie 'cat', or 'chair' etc
-           float value for box X pixel location of upper left within source image
-          float value for box Y pixel location of upper left within source image
-          float value for box X pixel location of lower right within source image
-          float value for box Y pixel location of lower right within source image
-          float value that is the probability for the network classification 0.0 - 1.0 inclusive.
-        """
-
-        # get the result from the queue
-        output, input_image = self._fifo_out.read_elem()
-
-        # save original width and height
-        input_image_width = input_image.shape[1]
-        input_image_height = input_image.shape[0]
-
-        # filter out all the objects/boxes that don't meet thresholds
-        return self._filter_objects(output, input_image_width, input_image_height), input_image
+    # def get_async_inference_result(self):
+    #     """Reads the next available object from the output FIFO queue.  If there is nothing on the output FIFO,
+    #     this fuction will block indefinitiley until there is.
+    #
+    #     :return: tuple of the filtered results along with the original input image
+    #     the filtered results is a list of lists. each of the inner lists represent one found object and contain
+    #     the following 6 values:
+    #        string that is network classification ie 'cat', or 'chair' etc
+    #        float value for box X pixel location of upper left within source image
+    #       float value for box Y pixel location of upper left within source image
+    #       float value for box X pixel location of lower right within source image
+    #       float value for box Y pixel location of lower right within source image
+    #       float value that is the probability for the network classification 0.0 - 1.0 inclusive.
+    #     """
+    #
+    #     # get the result from the queue
+    #     output, input_image = self._fifo_out.read_elem()
+    #
+    #     # save original width and height
+    #     input_image_width = input_image.shape[1]
+    #     input_image_height = input_image.shape[0]
+    #
+    #     # filter out all the objects/boxes that don't meet thresholds
+    #     return self._filter_objects(output, input_image_width, input_image_height), input_image
 
 
     # get the number of elemets in the input queue

@@ -4,7 +4,6 @@
 # License: MIT See LICENSE file in root directory.
 
 
-from mvnc import mvncapi as mvnc
 from video_processor import VideoProcessor
 from ssd_mobilenet_processor import SsdMobileNetProcessor
 import cv2
@@ -13,6 +12,7 @@ import time
 import os
 import sys
 from sys import argv
+from multiprocessing import Process, Queue
 
 # only accept classifications with 1 in the class id index.
 # default is to accept all object clasifications.
@@ -219,6 +219,32 @@ def print_usage():
     print('Example: ')
     print('python3 run_video.py resize_window=1920x1080 init_min_score=50 exclude_classes=5,11')
 
+def get_async_inference_result(queue:Queue):
+    """Reads the next available object from the output FIFO queue.  If there is nothing on the output FIFO,
+    this fuction will block indefinitiley until there is.
+
+    :return: tuple of the filtered results along with the original input image
+    the filtered results is a list of lists. each of the inner lists represent one found object and contain
+    the following 6 values:
+       string that is network classification ie 'cat', or 'chair' etc
+       float value for box X pixel location of upper left within source image
+      float value for box Y pixel location of upper left within source image
+      float value for box X pixel location of lower right within source image
+      float value for box Y pixel location of lower right within source image
+      float value that is the probability for the network classification 0.0 - 1.0 inclusive.
+    """
+
+    # get the result from the queue
+    fifo_out = queue.get()
+    output, input_image = fifo_out.read_elem()
+
+    # save original width and height
+    input_image_width = input_image.shape[1]
+    input_image_height = input_image.shape[0]
+
+    # filter out all the objects/boxes that don't meet thresholds
+    return self._filter_objects(output, input_image_width, input_image_height), input_image
+
 
 def main():
     """Main function for the program.  Everything starts here.
@@ -232,61 +258,43 @@ def main():
         print_usage()
         return 1
 
-    # get list of all the .mp4 files in the image directory
-    input_video_filename_list = os.listdir(input_video_path)
-    input_video_filename_list = [i for i in input_video_filename_list if i.endswith('.mp4')]
-    if (len(input_video_filename_list) < 1):
-        # no images to show
-        print('No video (.mp4) files found')
-        return 1
-
-    # Set logging level to only log errors
-    mvnc.global_set_option(mvnc.GlobalOption.RW_LOG_LEVEL, 3)
-
-    devices = mvnc.enumerate_devices()
-    if len(devices) < 1:
-        print('No NCS device detected.')
-        print('Insert device and try again!')
-        return 1
-
-    # Pick the first stick to run the network
-    # use the first NCS device that opens for the object detection.
-    dev_count = 0
-    for one_device in devices:
-        try:
-            obj_detect_dev = mvnc.Device(one_device)
-            obj_detect_dev.open()
-            print("opened device " + str(dev_count))
-            break;
-        except:
-            print("Could not open device " + str(dev_count) + ", trying next device")
-            pass
-        dev_count += 1
-
     cv2.namedWindow(cv_window_name)
     cv2.moveWindow(cv_window_name, 10,  10)
     cv2.waitKey(1)
 
-    obj_detector_proc = SsdMobileNetProcessor(NETWORK_GRAPH_FILENAME, obj_detect_dev,
-                                              inital_box_prob_thresh=min_score_percent/100.0,
-                                              classification_mask=object_classifications_mask)
 
     exit_app = False
     while (True):
         for input_video_file in input_video_filename_list :
 
+            # get list of all the .mp4 files in the image directory
+            input_video_filename_list = os.listdir(input_video_path)
+            input_video_filename_list = [i for i in input_video_filename_list if i.endswith('.mp4')]
+            if (len(input_video_filename_list) < 1):
+                # no images to show
+                print('No video (.mp4) files found')
+                return 1
+
+            image_queue = Queue()
+            inference_queue = Queue()
+
             # video processor that will put video frames images on the object detector's input FIFO queue
-            video_proc = VideoProcessor(input_video_path + '/' + input_video_file,
-                                         network_processor = obj_detector_proc)
-            video_proc.start_processing()
+            video_proc = VideoProcessor(output_queue=image_queue, input_video_path + '/' + input_video_file)
+            video_proc.start()
 
             frame_count = 0
             start_time = time.time()
             end_time = start_time
 
+            object_detector_proc = SsdMobileNetProcessor(intput_queue=image_queue, output_queue=inference_queue, NETWORK_GRAPH_FILENAME, obj_detect_dev,
+                                                            inital_box_prob_thresh=min_score_percent / 100.0,
+                                                            classification_mask=object_classifications_mask)
+            object_detector_proc.start()
+
             while(True):
                 try:
-                    (filtered_objs, display_image) = obj_detector_proc.get_async_inference_result()
+                    (filtered_objs, display_image) = get_async_inference_result(inference_queue)
+                    # This does not work. Add inter-process communication
                 except :
                     print("exception caught in main")
                     raise
@@ -297,7 +305,8 @@ def main():
                 prop_val = cv2.getWindowProperty(cv_window_name, cv2.WND_PROP_ASPECT_RATIO)
                 if (prop_val < 0.0):
                     end_time = time.time()
-                    video_proc.stop_processing()
+                    #video_proc.stop_processing()
+                    #This does not work. Add inter-process communication
                     exit_app = True
                     break
 
@@ -315,7 +324,8 @@ def main():
                     if (handle_keys(raw_key, obj_detector_proc) == False):
                         end_time = time.time()
                         exit_app = True
-                        video_proc.stop_processing()
+                        #video_proc.stop_processing()
+                        # This does not work. Add inter-process communication
                         continue
 
                 frame_count += 1
@@ -327,12 +337,6 @@ def main():
 
                 #frames_per_second = frame_count / (end_time - start_time)
                 #print('Frames per Second: ' + str(frames_per_second))
-
-            throttling = obj_detect_dev.get_option(mvnc.DeviceOption.RO_THERMAL_THROTTLING_LEVEL)
-            if (throttling > 0):
-                print("\nDevice is throttling, level is: " + str(throttling))
-                print("Sleeping for a few seconds....")
-                cv2.waitKey(2000)
 
             #video_proc.stop_processing()
             cv2.waitKey(1)
@@ -347,9 +351,6 @@ def main():
 
     # Clean up the graph and the device
     obj_detector_proc.cleanup()
-    obj_detect_dev.close()
-    obj_detect_dev.destroy()
-
     cv2.destroyAllWindows()
 
 
