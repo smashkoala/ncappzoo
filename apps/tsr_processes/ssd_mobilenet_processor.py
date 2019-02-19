@@ -19,7 +19,7 @@ class SsdMobileNetProcessor(Process):
     SSDMN_NETWORK_IMAGE_HEIGHT = 300
 
 
-    def __init__(self, input_queue: Queue, output_queue: Queue, network_graph_filename: str, ncs_device: mvnc.Device,
+    def __init__(self, network_graph_filename: str, input_queue: Queue, output_queue: Queue,
                  inital_box_prob_thresh: float, classification_mask:list=None):
         """Initializes an instance of the class
 
@@ -32,13 +32,38 @@ class SsdMobileNetProcessor(Process):
         :return : None
         """
 
-        Process.__init(self)
-        # Load graph from disk and allocate graph.
+        Process.__init__(self)
+        
+        # Set logging level to only log errors
+        mvnc.global_set_option(mvnc.GlobalOption.RW_LOG_LEVEL, 3)
+
+        devices = mvnc.enumerate_devices()
+        if len(devices) < 1:
+            print('No NCS device detected.')
+            print('Insert device and try again!')
+            return 1
+
+        # Pick the first stick to run the network
+        # use the first NCS device that opens for the object detection.
+        dev_count = 0
+        for one_device in devices:
+            try:
+                self._obj_detect_dev = mvnc.Device(one_device)
+                self._obj_detect_dev.open()
+                print("opened device " + str(dev_count))
+                break;
+            except:
+                print("Could not open device " + str(dev_count) + ", trying next device")
+                pass
+            dev_count += 1
+        
+        
+        # Load graph from disk and allocate graph.    
         try:
             with open(network_graph_filename, mode='rb') as graph_file:
                 graph_in_memory = graph_file.read()
             self._graph = mvnc.Graph("SSD MobileNet Graph")
-            self._fifo_in, self._fifo_out = self._graph.allocate_with_fifos(ncs_device, graph_in_memory)
+            self._fifo_in, self._fifo_out = self._graph.allocate_with_fifos(self._obj_detect_dev, graph_in_memory)
 
         except:
             print('\n\n')
@@ -115,6 +140,7 @@ class SsdMobileNetProcessor(Process):
         # this returns a new image so the input_image is unchanged
         while True:
 
+            input_image = self._input_queue.get()
             inference_image = cv2.resize(input_image,
                                      (SsdMobileNetProcessor.SSDMN_NETWORK_IMAGE_WIDTH,
                                       SsdMobileNetProcessor.SSDMN_NETWORK_IMAGE_HEIGHT),

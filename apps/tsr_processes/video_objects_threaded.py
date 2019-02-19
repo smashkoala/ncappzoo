@@ -39,7 +39,7 @@ obj_detector_proc = None
 video_proc = None
 
 # read video files from this directory
-input_video_path = '../'
+input_video_path = '../../../..'
 
 # the resize_window arg will modify these if its specified on the commandline
 resize_output = False
@@ -264,29 +264,30 @@ def main():
 
 
     exit_app = False
+    
+    # get list of all the .mp4 files in the image directory
+    input_video_filename_list = os.listdir(input_video_path)
+    input_video_filename_list = [i for i in input_video_filename_list if i.endswith('.mp4')]
+    if (len(input_video_filename_list) < 1):
+        # no images to show
+        print('No video (.mp4) files found')
+        return 1
+    
     while (True):
         for input_video_file in input_video_filename_list :
-
-            # get list of all the .mp4 files in the image directory
-            input_video_filename_list = os.listdir(input_video_path)
-            input_video_filename_list = [i for i in input_video_filename_list if i.endswith('.mp4')]
-            if (len(input_video_filename_list) < 1):
-                # no images to show
-                print('No video (.mp4) files found')
-                return 1
 
             image_queue = Queue()
             inference_queue = Queue()
 
             # video processor that will put video frames images on the object detector's input FIFO queue
-            video_proc = VideoProcessor(output_queue=image_queue, input_video_path + '/' + input_video_file)
+            video_proc = VideoProcessor(input_video_path + '/' + input_video_file, output_queue=image_queue)
             video_proc.start()
 
             frame_count = 0
             start_time = time.time()
             end_time = start_time
 
-            object_detector_proc = SsdMobileNetProcessor(intput_queue=image_queue, output_queue=inference_queue, NETWORK_GRAPH_FILENAME, obj_detect_dev,
+            object_detector_proc = SsdMobileNetProcessor(NETWORK_GRAPH_FILENAME, input_queue=image_queue, output_queue=inference_queue, 
                                                             inital_box_prob_thresh=min_score_percent / 100.0,
                                                             classification_mask=object_classifications_mask)
             object_detector_proc.start()

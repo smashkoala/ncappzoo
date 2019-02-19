@@ -34,30 +34,7 @@ class VideoProcessor(Process):
         :param queue_put_wait_max: The max number of seconds to wait when putting on output queue
         :param queue_full_sleep_seconds: The number of seconds to sleep when the output queue is full.
         """
-        Process.__init(self)
-
-        # Set logging level to only log errors
-        mvnc.global_set_option(mvnc.GlobalOption.RW_LOG_LEVEL, 3)
-
-        devices = mvnc.enumerate_devices()
-        if len(devices) < 1:
-            print('No NCS device detected.')
-            print('Insert device and try again!')
-            return 1
-
-        # Pick the first stick to run the network
-        # use the first NCS device that opens for the object detection.
-        dev_count = 0
-        for one_device in devices:
-            try:
-                self._obj_detect_dev = mvnc.Device(one_device)
-                self._obj_detect_dev.open()
-                print("opened device " + str(dev_count))
-                break;
-            except:
-                print("Could not open device " + str(dev_count) + ", trying next device")
-                pass
-            dev_count += 1
+        Process.__init__(self)
 
         self._queue_full_sleep_seconds = queue_full_sleep_seconds
         self._queue_put_wait_max = queue_put_wait_max
@@ -65,7 +42,7 @@ class VideoProcessor(Process):
         self._request_video_width = request_video_width
         self._request_video_height = request_video_height
         self._pause_mode = False
-        self._image_queue = mp.Queue()
+        self._image_queue = Queue()
 
         # create the video device
         self._video_device = cv2.VideoCapture(self._video_file)
@@ -89,7 +66,6 @@ class VideoProcessor(Process):
         print('actual video resolution: ' + str(self._actual_video_width) + ' x ' + str(self._actual_video_height))
 
         self._output_queue = output_queue
-        self._network_processor = network_processor
 
         self._use_output_queue = False
         if (not(self._output_queue is None)):
